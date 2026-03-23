@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Redis服务
+  redis:
+    image: redis:7.0-alpine
+    container_name: ecommerce-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  # RabbitMQ服务
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    container_name: ecommerce-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP端口
+      - "15672:15672" # 管理界面端口
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+  rabbitmq-data:
+    driver: local
+
+networks:
+  ecommerce-network:
+    driver: bridge
+
+
+
