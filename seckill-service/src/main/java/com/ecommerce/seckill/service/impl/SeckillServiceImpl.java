@@ -11,8 +11,6 @@ import com.ecommerce.seckill.mapper.SeckillActivityMapper;
 import com.ecommerce.seckill.service.SeckillService;
 import com.ecommerce.seckill.vo.SeckillOrderVO;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -26,14 +24,13 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 秒杀服务实现
- * 
- * 高并发解决方案：
- * 1. Redis库存预热：将数据库库存加载到Redis，减少数据库压力
- * 2. Lua脚本：保证Redis操作的原子性
- * 3. 分布式锁（Redisson）：防止超卖
- * 4. 令牌桶限流：控制流量，防止系统崩溃
- * 5. 消息队列异步处理：削峰填谷
- * 6. 用户购买记录：防止重复购买
+ *
+ * 高并发方案：
+ * 1. Redis 库存预热
+ * 2. Lua 原子扣减 Redis 库存
+ * 3. 固定窗口限流
+ * 4. 用户购买标记防重
+ * 5. RabbitMQ 异步落库；消费者侧用 Redisson + DB 乐观锁扣库存，失败回补 Redis
  */
 @Slf4j
 @Service
@@ -44,9 +41,6 @@ public class SeckillServiceImpl implements SeckillService {
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
-
-    @Resource
-    private RedissonClient redissonClient;
 
     @Resource
     private RabbitTemplate rabbitTemplate;
@@ -180,12 +174,19 @@ public class SeckillServiceImpl implements SeckillService {
         orderVO.setQuantity(quantity);
         orderVO.setSeckillPrice(activity.getSeckillPrice());
 
-        // 8. 发送到消息队列异步处理
-        rabbitTemplate.convertAndSend(
-                MqConstant.SECKILL_ORDER_EXCHANGE,
-                MqConstant.SECKILL_ORDER_ROUTING_KEY,
-                JSON.toJSONString(orderVO)
-        );
+        // 8. 发送到消息队列异步处理（失败则回补 Redis，避免超卖标记悬空）
+        try {
+            rabbitTemplate.convertAndSend(
+                    MqConstant.SECKILL_ORDER_EXCHANGE,
+                    MqConstant.SECKILL_ORDER_ROUTING_KEY,
+                    JSON.toJSONString(orderVO)
+            );
+        } catch (Exception e) {
+            log.error("秒杀消息发送失败，回补库存。orderNo={}", orderNo, e);
+            stringRedisTemplate.opsForValue().increment(stockKey, quantity);
+            stringRedisTemplate.delete(userSeckillKey);
+            throw new BusinessException("系统繁忙，请稍后重试");
+        }
 
         log.info("秒杀成功，订单号：{}，用户ID：{}，活动ID：{}", orderNo, userId, activityId);
         return orderNo;
@@ -193,17 +194,14 @@ public class SeckillServiceImpl implements SeckillService {
 
     @Override
     public boolean acquireSeckillToken(Long activityId) {
-        // 使用令牌桶算法限流
-        // 这里简化实现，实际生产环境可以使用Guava RateLimiter或Redis实现
+        // 固定窗口计数限流（非严格令牌桶）：每秒最多 1000 次
         String rateLimitKey = RedisKeyConstant.RATE_LIMIT_KEY + activityId;
         Long increment = stringRedisTemplate.opsForValue().increment(rateLimitKey);
-        
-        if (increment == 1) {
-            // 第一次访问，设置过期时间
+
+        if (increment != null && increment == 1) {
             stringRedisTemplate.expire(rateLimitKey, 1, TimeUnit.SECONDS);
         }
 
-        // 每秒最多1000个请求
         return increment != null && increment <= 1000;
     }
 }
