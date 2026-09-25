@@ -1,6 +1,8 @@
 package com.ecommerce.seckill.service.impl;
 
 import cn.hutool.core.util.IdUtil;
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ecommerce.common.constant.MqConstant;
@@ -16,7 +18,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -111,6 +113,7 @@ public class SeckillServiceImpl implements SeckillService {
     }
 
     @Override
+    @SentinelResource(value = "doSeckill", blockHandler = "doSeckillBlockHandler")
     public String doSeckill(Long activityId, Long userId, Integer quantity) {
         // 1. 校验活动状态
         SeckillActivity activity = getActivityById(activityId);
@@ -139,32 +142,23 @@ public class SeckillServiceImpl implements SeckillService {
             throw new BusinessException("您已经参与过该秒杀活动");
         }
 
-        // 4. 令牌桶限流
-        if (!acquireSeckillToken(activityId)) {
-            throw new BusinessException("系统繁忙，请稍后重试");
-        }
-
-        // 5. 使用Lua脚本扣减Redis库存（原子操作）
+        // 4. Lua 原子扣减 Redis 库存（限流交给 Sentinel）
         String stockKey = RedisKeyConstant.SECKILL_STOCK_KEY + activityId;
         DefaultRedisScript<Long> script = new DefaultRedisScript<>(DEDUCT_STOCK_SCRIPT, Long.class);
-        Long result = stringRedisTemplate.execute(script, 
-                Collections.singletonList(stockKey), 
+        Long result = stringRedisTemplate.execute(script,
+                Collections.singletonList(stockKey),
                 String.valueOf(quantity));
 
         if (result == null || result == -1) {
-            // Redis中没有库存数据，需要预热
             stringRedisTemplate.delete(userSeckillKey);
             throw new BusinessException("系统异常，请稍后重试");
         } else if (result == 0) {
-            // 库存不足
             stringRedisTemplate.delete(userSeckillKey);
             throw new BusinessException("商品已抢光");
         }
 
-        // 6. 生成订单号
         String orderNo = IdUtil.getSnowflakeNextIdStr();
 
-        // 7. 构建秒杀订单消息
         SeckillOrderVO orderVO = new SeckillOrderVO();
         orderVO.setOrderNo(orderNo);
         orderVO.setUserId(userId);
@@ -174,7 +168,6 @@ public class SeckillServiceImpl implements SeckillService {
         orderVO.setQuantity(quantity);
         orderVO.setSeckillPrice(activity.getSeckillPrice());
 
-        // 8. 发送到消息队列异步处理（失败则回补 Redis，避免超卖标记悬空）
         try {
             rabbitTemplate.convertAndSend(
                     MqConstant.SECKILL_ORDER_EXCHANGE,
@@ -192,17 +185,8 @@ public class SeckillServiceImpl implements SeckillService {
         return orderNo;
     }
 
-    @Override
-    public boolean acquireSeckillToken(Long activityId) {
-        // 固定窗口计数限流（非严格令牌桶）：每秒最多 1000 次
-        String rateLimitKey = RedisKeyConstant.RATE_LIMIT_KEY + activityId;
-        Long increment = stringRedisTemplate.opsForValue().increment(rateLimitKey);
-
-        if (increment != null && increment == 1) {
-            stringRedisTemplate.expire(rateLimitKey, 1, TimeUnit.SECONDS);
-        }
-
-        return increment != null && increment <= 1000;
+    public String doSeckillBlockHandler(Long activityId, Long userId, Integer quantity, BlockException ex) {
+        throw new BusinessException("系统繁忙，请稍后重试（Sentinel限流）");
     }
 }
 

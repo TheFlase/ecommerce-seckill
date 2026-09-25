@@ -15,19 +15,16 @@ import reactor.core.publisher.Mono;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * 认证过滤器
- */
 @Slf4j
 @Component
 public class AuthFilter implements GlobalFilter, Ordered {
 
-    // 白名单路径（不需要认证）
     private static final List<String> WHITE_LIST = Arrays.asList(
             "/user/login",
             "/user/register",
             "/product/list",
-            "/product/detail"
+            "/product/detail",
+            "/actuator"
     );
 
     @Override
@@ -35,29 +32,34 @@ public class AuthFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
-        // 白名单路径直接放行
         if (isWhitePath(path)) {
             return chain.filter(exchange);
         }
 
-        // 获取token
         String token = request.getHeaders().getFirst("Authorization");
         if (token == null || token.isEmpty()) {
             log.warn("请求路径：{} 缺少token", path);
             return unauthorized(exchange.getResponse());
         }
 
-        // 验证token
         try {
             if (JwtUtil.isTokenExpired(token)) {
                 log.warn("请求路径：{} token已过期", path);
                 return unauthorized(exchange.getResponse());
             }
 
-            // 将用户ID传递给下游服务
             Long userId = JwtUtil.getUserId(token);
+            String username = JwtUtil.getUsername(token);
+
+            // 预热接口仅管理员
+            if (path.contains("/seckill/warm-up") && !"admin".equals(username)) {
+                log.warn("非管理员尝试预热：{}", username);
+                return forbidden(exchange.getResponse());
+            }
+
             ServerHttpRequest newRequest = request.mutate()
                     .header("userId", userId.toString())
+                    .header("username", username)
                     .build();
 
             return chain.filter(exchange.mutate().request(newRequest).build());
@@ -76,11 +78,13 @@ public class AuthFilter implements GlobalFilter, Ordered {
         return response.setComplete();
     }
 
+    private Mono<Void> forbidden(ServerHttpResponse response) {
+        response.setStatusCode(HttpStatus.FORBIDDEN);
+        return response.setComplete();
+    }
+
     @Override
     public int getOrder() {
         return -100;
     }
 }
-
-
-

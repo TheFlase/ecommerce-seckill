@@ -1,6 +1,5 @@
 package com.ecommerce.user.service.impl;
 
-import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ecommerce.common.constant.RedisKeyConstant;
 import com.ecommerce.common.exception.BusinessException;
@@ -12,18 +11,18 @@ import com.ecommerce.user.vo.LoginVO;
 import com.ecommerce.user.vo.RegisterVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 用户服务实现
- */
 @Slf4j
 @Service
 public class UserServiceImpl implements UserService {
+
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Resource
     private UserMapper userMapper;
@@ -33,16 +32,14 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void register(RegisterVO registerVO) {
-        // 检查用户名是否存在
         User existUser = getUserByUsername(registerVO.getUsername());
         if (existUser != null) {
             throw new BusinessException("用户名已存在");
         }
 
-        // 创建用户
         User user = new User();
         user.setUsername(registerVO.getUsername());
-        user.setPassword(DigestUtil.md5Hex(registerVO.getPassword()));
+        user.setPassword(passwordEncoder.encode(registerVO.getPassword()));
         user.setPhone(registerVO.getPhone());
         user.setEmail(registerVO.getEmail());
         user.setNickname(registerVO.getNickname());
@@ -56,27 +53,20 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public String login(LoginVO loginVO) {
-        // 查询用户
         User user = getUserByUsername(loginVO.getUsername());
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
 
-        // 验证密码
-        String inputPassword = DigestUtil.md5Hex(loginVO.getPassword());
-        if (!inputPassword.equals(user.getPassword())) {
+        if (!passwordEncoder.matches(loginVO.getPassword(), user.getPassword())) {
             throw new BusinessException("密码错误");
         }
 
-        // 检查用户状态
         if (user.getStatus() != 0) {
             throw new BusinessException("账号已被禁用");
         }
 
-        // 生成token
         String token = JwtUtil.generateToken(user.getId(), user.getUsername());
-
-        // 缓存用户信息
         String userKey = RedisKeyConstant.USER_INFO_KEY + user.getId();
         stringRedisTemplate.opsForValue().set(userKey, user.getUsername(), 24, TimeUnit.HOURS);
 
@@ -96,6 +86,3 @@ public class UserServiceImpl implements UserService {
         return userMapper.selectOne(wrapper);
     }
 }
-
-
-

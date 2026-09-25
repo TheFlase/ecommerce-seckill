@@ -1,0 +1,10 @@
+[
+  {
+    "resource": "doSeckill",
+    "count": 50,
+    "grade": 1,
+    "limitApp": "default",
+    "strategy": 0,
+    "controlBehavior": 0
+  }
+]

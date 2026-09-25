@@ -105,11 +105,11 @@ CREATE TABLE IF NOT EXISTS t_seckill_order (
 
 -- 插入测试数据
 
--- 插入测试用户
+-- 插入测试用户（密码均为 password，BCrypt）
 INSERT INTO t_user (username, password, phone, email, nickname, status) VALUES
-('testuser1', '5f4dcc3b5aa765d61d8327deb882cf99', '13800138001', 'test1@example.com', '测试用户1', 0),
-('testuser2', '5f4dcc3b5aa765d61d8327deb882cf99', '13800138002', 'test2@example.com', '测试用户2', 0),
-('admin', '5f4dcc3b5aa765d61d8327deb882cf99', '13800138000', 'admin@example.com', '管理员', 0);
+('testuser1', '$2a$10$pXjXNWd6C8sCQBHzdS0Pc.0cwOBExFPJ1gZhE40YlRxrCqwFnzhOa', '13800138001', 'test1@example.com', '测试用户1', 0),
+('testuser2', '$2a$10$pXjXNWd6C8sCQBHzdS0Pc.0cwOBExFPJ1gZhE40YlRxrCqwFnzhOa', '13800138002', 'test2@example.com', '测试用户2', 0),
+('admin', '$2a$10$pXjXNWd6C8sCQBHzdS0Pc.0cwOBExFPJ1gZhE40YlRxrCqwFnzhOa', '13800138000', 'admin@example.com', '管理员', 0);
 
 -- 插入测试商品
 INSERT INTO t_product (product_name, description, image_url, original_price, current_price, stock, sales, category, status) VALUES
@@ -146,7 +146,7 @@ SELECT * FROM t_seckill_activity;
 -- 提示信息
 SELECT '========================================' as '';
 SELECT '数据库初始化完成！' as '提示';
-SELECT '默认密码（MD5）: password' as '说明';
+SELECT '默认密码（BCrypt）: password' as '说明';
 SELECT '测试用户: testuser1 / testuser2' as '账号';
 SELECT '管理员: admin' as '账号';
 SELECT '========================================' as '';

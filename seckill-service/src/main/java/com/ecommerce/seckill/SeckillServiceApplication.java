@@ -5,12 +5,14 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 秒杀服务
  */
 @EnableFeignClients
 @EnableDiscoveryClient
+@EnableScheduling
 @SpringBootApplication(scanBasePackages = {"com.ecommerce.seckill", "com.ecommerce.common"})
 @MapperScan("com.ecommerce.seckill.mapper")
 public class SeckillServiceApplication {
