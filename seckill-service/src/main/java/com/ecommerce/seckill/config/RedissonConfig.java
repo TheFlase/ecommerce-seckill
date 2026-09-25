@@ -13,10 +13,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RedissonConfig {
 
-    @Value("${spring.redis.host}")
+    @Value("${spring.data.redis.host:localhost}")
     private String redisHost;
 
-    @Value("${spring.redis.port}")
+    @Value("${spring.data.redis.port:6379}")
     private String redisPort;
 
     @Bean
@@ -34,6 +34,3 @@ public class RedissonConfig {
         return Redisson.create(config);
     }
 }
-
-
-
