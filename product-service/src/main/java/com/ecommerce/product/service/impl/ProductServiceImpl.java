@@ -66,10 +66,12 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public boolean deductStock(Long productId, Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new BusinessException("扣减数量必须为正整数");
+        }
         int rows = productMapper.deductStock(productId, quantity);
         if (rows > 0) {
             log.info("扣减库存成功，商品ID：{}，数量：{}", productId, quantity);
-            // 删除缓存
             stringRedisTemplate.delete(RedisKeyConstant.PRODUCT_DETAIL_KEY + productId);
             return true;
         }
@@ -79,14 +81,16 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public boolean rollbackStock(Long productId, Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new BusinessException("回补数量必须为正整数");
+        }
         Product product = productMapper.selectById(productId);
         if (product != null) {
             product.setStock(product.getStock() + quantity);
-            product.setSales(product.getSales() - quantity);
+            product.setSales(Math.max(0, product.getSales() - quantity));
             productMapper.updateById(product);
-            
+
             log.info("回滚库存成功，商品ID：{}，数量：{}", productId, quantity);
-            // 删除缓存
             stringRedisTemplate.delete(RedisKeyConstant.PRODUCT_DETAIL_KEY + productId);
             return true;
         }

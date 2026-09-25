@@ -47,8 +47,9 @@ public class OrderController {
      * 查询订单详情
      */
     @GetMapping("/detail/{orderNo}")
-    public Result<Order> getOrderDetail(@PathVariable String orderNo) {
-        Order order = orderService.getOrderByOrderNo(orderNo);
+    public Result<Order> getOrderDetail(@PathVariable String orderNo,
+                                        @RequestHeader("userId") Long userId) {
+        Order order = orderService.getOrderByOrderNo(orderNo, userId);
         return Result.success(order);
     }
 

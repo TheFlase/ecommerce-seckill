@@ -25,6 +25,11 @@ public interface OrderService {
     Order getOrderByOrderNo(String orderNo);
 
     /**
+     * 根据订单号查询订单（校验归属）
+     */
+    Order getOrderByOrderNo(String orderNo, Long userId);
+
+    /**
      * 取消订单
      */
     void cancelOrder(String orderNo, Long userId);

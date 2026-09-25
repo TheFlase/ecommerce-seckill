@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ecommerce.common.exception.BusinessException;
 import com.ecommerce.common.result.Result;
+import com.ecommerce.order.dto.ProductDTO;
 import com.ecommerce.order.entity.Order;
 import com.ecommerce.order.feign.ProductFeignClient;
 import com.ecommerce.order.mapper.OrderMapper;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.Resource;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -33,35 +35,63 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Order createOrder(CreateOrderVO createOrderVO) {
-        // 扣减库存
-        Result<Boolean> result = productFeignClient.deductStock(
-                createOrderVO.getProductId(), 
+        if (createOrderVO.getQuantity() == null || createOrderVO.getQuantity() <= 0) {
+            throw new BusinessException("购买数量必须为正整数");
+        }
+        if (createOrderVO.getProductId() == null) {
+            throw new BusinessException("商品ID不能为空");
+        }
+
+        // 价格/名称以服务端商品为准，不信任客户端
+        Result<ProductDTO> productResult = productFeignClient.getProductDetail(createOrderVO.getProductId());
+        ProductDTO product = productResult == null ? null : productResult.getData();
+        if (product == null || product.getId() == null) {
+            throw new BusinessException("商品不存在");
+        }
+        if (product.getStatus() != null && product.getStatus() != 1) {
+            throw new BusinessException("商品已下架");
+        }
+        if (product.getCurrentPrice() == null || product.getCurrentPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("商品价格异常");
+        }
+
+        Result<Boolean> deductResult = productFeignClient.deductStock(
+                createOrderVO.getProductId(),
                 createOrderVO.getQuantity()
         );
-        
-        if (result.getData() == null || !result.getData()) {
+        if (deductResult.getData() == null || !deductResult.getData()) {
             throw new BusinessException("库存不足");
         }
 
-        // 创建订单
-        Order order = new Order();
-        order.setOrderNo(IdUtil.getSnowflakeNextIdStr());
-        order.setUserId(createOrderVO.getUserId());
-        order.setProductId(createOrderVO.getProductId());
-        order.setProductName(createOrderVO.getProductName());
-        order.setQuantity(createOrderVO.getQuantity());
-        order.setPrice(createOrderVO.getPrice());
-        order.setTotalPrice(createOrderVO.getPrice().multiply(
-                new java.math.BigDecimal(createOrderVO.getQuantity())
-        ));
-        order.setStatus(0); // 待支付
-        order.setOrderType(0); // 普通订单
-        order.setCreateTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
+        try {
+            Order order = new Order();
+            order.setOrderNo(IdUtil.getSnowflakeNextIdStr());
+            order.setUserId(createOrderVO.getUserId());
+            order.setProductId(product.getId());
+            order.setProductName(product.getProductName());
+            order.setQuantity(createOrderVO.getQuantity());
+            order.setPrice(product.getCurrentPrice());
+            order.setTotalPrice(product.getCurrentPrice().multiply(
+                    BigDecimal.valueOf(createOrderVO.getQuantity())
+            ));
+            order.setStatus(0);
+            order.setOrderType(0);
+            order.setCreateTime(LocalDateTime.now());
+            order.setUpdateTime(LocalDateTime.now());
 
-        orderMapper.insert(order);
-        log.info("创建订单成功，订单号：{}", order.getOrderNo());
-        return order;
+            orderMapper.insert(order);
+            log.info("创建订单成功，订单号：{}", order.getOrderNo());
+            return order;
+        } catch (RuntimeException e) {
+            // 本地事务无法回滚远程扣减，尽力补偿
+            try {
+                productFeignClient.rollbackStock(createOrderVO.getProductId(), createOrderVO.getQuantity());
+            } catch (Exception ex) {
+                log.error("下单失败后回补库存也失败，productId={}, qty={}",
+                        createOrderVO.getProductId(), createOrderVO.getQuantity(), ex);
+            }
+            throw e;
+        }
     }
 
     @Override
@@ -85,28 +115,34 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    public Order getOrderByOrderNo(String orderNo, Long userId) {
+        Order order = getOrderByOrderNo(orderNo);
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException("无权查看此订单");
+        }
+        return order;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(String orderNo, Long userId) {
         Order order = getOrderByOrderNo(orderNo);
-        
-        // 验证用户
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权操作此订单");
         }
 
-        // 只有待支付状态才能取消
-        if (order.getStatus() != 0) {
+        // 先条件更新状态，再回库存，避免并发双回补
+        int rows = orderMapper.cancelIfPending(orderNo, userId);
+        if (rows <= 0) {
             throw new BusinessException("订单状态不允许取消");
         }
 
-        // 回滚库存
-        productFeignClient.rollbackStock(order.getProductId(), order.getQuantity());
+        Result<Boolean> rollback = productFeignClient.rollbackStock(order.getProductId(), order.getQuantity());
+        if (rollback == null || rollback.getData() == null || !rollback.getData()) {
+            log.error("取消订单后库存回补失败，需人工处理。orderNo={}, productId={}, qty={}",
+                    orderNo, order.getProductId(), order.getQuantity());
+        }
 
-        // 更新订单状态
-        order.setStatus(2); // 已取消
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
-        
         log.info("取消订单成功，订单号：{}", orderNo);
     }
 
@@ -114,25 +150,15 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(rollbackFor = Exception.class)
     public void payOrder(String orderNo, Long userId) {
         Order order = getOrderByOrderNo(orderNo);
-        
-        // 验证用户
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权操作此订单");
         }
 
-        // 只有待支付状态才能支付
-        if (order.getStatus() != 0) {
+        int rows = orderMapper.payIfPending(orderNo, userId);
+        if (rows <= 0) {
             throw new BusinessException("订单状态不允许支付");
         }
 
-        // 更新订单状态
-        order.setStatus(1); // 已支付
-        order.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(order);
-        
         log.info("支付订单成功，订单号：{}", orderNo);
     }
 }
-
-
-

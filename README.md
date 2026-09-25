@@ -36,6 +36,10 @@ mvn -DskipTests clean install
 
 # 4) 冒烟（login → admin 预热 → 秒杀）
 .\scripts\demo-smoke.ps1
+
+# 5) 压测（默认 50 用户 / 并发 20；每次自动注册新用户）
+.\scripts\load-seckill.ps1
+.\scripts\load-seckill.ps1 -Users 80 -Concurrency 40
 ```
 
 ## 端口

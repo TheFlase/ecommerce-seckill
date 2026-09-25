@@ -99,17 +99,25 @@ public class SeckillServiceImpl implements SeckillService {
         if (activity == null) {
             throw new BusinessException("秒杀活动不存在");
         }
+        if (activity.getStatus() == null || activity.getStatus() != 1) {
+            throw new BusinessException("仅进行中的活动可预热");
+        }
 
-        // 将库存加载到Redis
+        // SET NX：禁止重复预热覆盖未落库的 Redis 预扣
         String stockKey = RedisKeyConstant.SECKILL_STOCK_KEY + activityId;
-        stringRedisTemplate.opsForValue().set(stockKey, String.valueOf(activity.getSeckillStock()));
-        
-        // 缓存活动信息
+        Boolean initialized = stringRedisTemplate.opsForValue().setIfAbsent(
+                stockKey, String.valueOf(activity.getSeckillStock()));
+        if (!Boolean.TRUE.equals(initialized)) {
+            // 已存在则跳过，绝不覆盖进行中的预扣库存
+            log.info("库存已预热，跳过覆盖。活动ID：{}", activityId);
+        }
+
         String activityKey = RedisKeyConstant.SECKILL_PRODUCT_KEY + activityId;
-        stringRedisTemplate.opsForValue().set(activityKey, JSON.toJSONString(activity), 
+        stringRedisTemplate.opsForValue().set(activityKey, JSON.toJSONString(activity),
                 30, TimeUnit.MINUTES);
 
-        log.info("秒杀库存预热成功，活动ID：{}，库存：{}", activityId, activity.getSeckillStock());
+        log.info("秒杀库存预热完成，活动ID：{}，本次写入库存={}", activityId,
+                Boolean.TRUE.equals(initialized) ? activity.getSeckillStock() : "(unchanged)");
     }
 
     @Override
@@ -129,7 +137,10 @@ public class SeckillServiceImpl implements SeckillService {
             throw new BusinessException("秒杀活动已结束");
         }
 
-        // 2. 校验购买数量
+        // 2. 校验购买数量（必须为正整数，避免负数使 Lua decrby 变成加库存）
+        if (quantity == null || quantity <= 0) {
+            throw new BusinessException("购买数量必须为正整数");
+        }
         if (quantity > activity.getLimitPerUser()) {
             throw new BusinessException("超过限购数量");
         }
