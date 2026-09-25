@@ -7,27 +7,17 @@ import com.ecommerce.product.entity.Product;
  * 商品服务
  */
 public interface ProductService {
-    
-    /**
-     * 分页查询商品列表
-     */
+
     Page<Product> getProductList(Integer pageNum, Integer pageSize, String category);
 
-    /**
-     * 根据ID查询商品详情
-     */
     Product getProductById(Long productId);
 
-    /**
-     * 扣减库存
-     */
-    boolean deductStock(Long productId, Integer quantity);
+    /** 幂等扣减：bizNo 唯一标识一次扣减 */
+    boolean deductStock(Long productId, Integer quantity, String bizNo);
 
     /**
-     * 回滚库存
+     * 幂等回补：bizNo 唯一标识一次回补。
+     * deductBizNo 非空时，仅当存在对应 DEDUCT 记录才真正加库存。
      */
-    boolean rollbackStock(Long productId, Integer quantity);
+    boolean rollbackStock(Long productId, Integer quantity, String bizNo, String deductBizNo);
 }
-
-
-

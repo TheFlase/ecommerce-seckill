@@ -103,6 +103,19 @@ CREATE TABLE IF NOT EXISTS t_seckill_order (
     KEY idx_create_time (create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀订单表';
 
+-- 库存操作幂等表（扣减/回补按业务单号去重）
+CREATE TABLE IF NOT EXISTS t_stock_operation (
+    id BIGINT(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    biz_no VARCHAR(64) NOT NULL COMMENT '业务单号',
+    op_type VARCHAR(16) NOT NULL COMMENT 'DEDUCT/ROLLBACK',
+    product_id BIGINT(20) NOT NULL COMMENT '商品ID',
+    quantity INT(11) NOT NULL COMMENT '数量',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_biz_op (biz_no, op_type),
+    KEY idx_product_id (product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库存操作幂等表';
+
 -- 插入测试数据
 
 -- 插入测试用户（密码均为 password，BCrypt）

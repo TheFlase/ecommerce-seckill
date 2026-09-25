@@ -2,6 +2,7 @@ package com.ecommerce.product.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ecommerce.product.entity.Product;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
 
 /**
@@ -14,7 +15,11 @@ public interface ProductMapper extends BaseMapper<Product> {
      */
     @Update("UPDATE t_product SET stock = stock - #{quantity}, sales = sales + #{quantity} " +
             "WHERE id = #{productId} AND stock >= #{quantity}")
-    int deductStock(Long productId, Integer quantity);
+    int deductStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
+
+    @Update("UPDATE t_product SET stock = stock + #{quantity}, " +
+            "sales = GREATEST(0, sales - #{quantity}) WHERE id = #{productId}")
+    int rollbackStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
 }
 
 

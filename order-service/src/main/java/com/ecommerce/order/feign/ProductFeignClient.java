@@ -8,9 +8,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-/**
- * 商品服务Feign客户端
- */
 @FeignClient(name = "product-service")
 public interface ProductFeignClient {
 
@@ -19,9 +16,12 @@ public interface ProductFeignClient {
 
     @PostMapping("/product/deduct-stock")
     Result<Boolean> deductStock(@RequestParam("productId") Long productId,
-                                @RequestParam("quantity") Integer quantity);
+                                @RequestParam("quantity") Integer quantity,
+                                @RequestParam("bizNo") String bizNo);
 
     @PostMapping("/product/rollback-stock")
     Result<Boolean> rollbackStock(@RequestParam("productId") Long productId,
-                                  @RequestParam("quantity") Integer quantity);
+                                  @RequestParam("quantity") Integer quantity,
+                                  @RequestParam("bizNo") String bizNo,
+                                  @RequestParam(value = "deductBizNo", required = false) String deductBizNo);
 }
